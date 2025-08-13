@@ -1,11 +1,13 @@
 """Deck deduplication functionality."""
 
 from collections.abc import Callable
+from pathlib import Path
 
 from tidylinq import Table
 
 from tidyanki.models.anki_models import AnkiCard
 
+from .import_apkg import load_cards_from_apkg
 from .tables import AnkiCardsTable
 
 
@@ -170,3 +172,115 @@ def analyze_deck_overlap(deck1_name: str, deck2_name: str, comparison_field_inde
         "overlap_percentage_deck1": (overlap_count / deck1_total * 100) if deck1_total > 0 else 0,
         "overlap_percentage_deck2": (overlap_count / deck2_total * 100) if deck2_total > 0 else 0,
     }
+
+
+def find_external_deck_duplicates(
+    apkg_path: Path,
+    existing_collection: Table[AnkiCard] | None = None,
+    comparison_fields: list[int] | None = None,
+    custom_comparison: Callable[[str, str], bool] | None = None,
+) -> Table[AnkiCard]:
+    """Find cards in external .apkg file that already exist in the collection.
+
+    Args:
+        apkg_path: Path to the .apkg file to check for duplicates
+        existing_collection: Optional pre-loaded collection cards. If None, loads all cards.
+        comparison_fields: Which field indices to compare (default: [0] for first field only)
+        custom_comparison: Optional custom comparison function
+
+    Returns:
+        Table of duplicate cards from the external deck
+    """
+    # Load cards from .apkg file
+    external_cards = load_cards_from_apkg(apkg_path)
+
+    # Load existing collection if not provided
+    if existing_collection is None:
+        existing_collection = AnkiCardsTable.load()
+
+    # Set default comparison fields
+    if comparison_fields is None:
+        comparison_fields = [0]
+
+    # Define comparison function
+    if custom_comparison is None:
+
+        def default_comparison(new_field: str, existing_field: str) -> bool:
+            return new_field.strip().lower() == existing_field.strip().lower()
+
+        comparison_func = default_comparison
+    else:
+        comparison_func = custom_comparison
+
+    # Find duplicates by checking if any comparison field matches
+    duplicates = external_cards.where(
+        lambda external_card: existing_collection.any(
+            lambda existing_card: any(
+                len(external_card.fields) > field_idx
+                and len(existing_card.fields) > field_idx
+                and comparison_func(
+                    external_card.fields[field_idx],
+                    existing_card.fields[field_idx],
+                )
+                for field_idx in comparison_fields
+            )
+        )
+    )
+
+    return Table.from_rows(list(duplicates), AnkiCard)
+
+
+def deduplicate_external_deck(
+    apkg_path: Path,
+    existing_collection: Table[AnkiCard] | None = None,
+    comparison_fields: list[int] | None = None,
+    custom_comparison: Callable[[str, str], bool] | None = None,
+) -> Table[AnkiCard]:
+    """Remove cards from external .apkg file that already exist in the collection.
+
+    Args:
+        apkg_path: Path to the .apkg file to deduplicate
+        existing_collection: Optional pre-loaded collection cards. If None, loads all cards.
+        comparison_fields: Which field indices to compare (default: [0] for first field only)
+        custom_comparison: Optional custom comparison function
+
+    Returns:
+        Table of unique cards (cards that don't exist in collection)
+    """
+    # Load cards from .apkg file
+    external_cards = load_cards_from_apkg(apkg_path)
+
+    # Load existing collection if not provided
+    if existing_collection is None:
+        existing_collection = AnkiCardsTable.load()
+
+    # Set default comparison fields
+    if comparison_fields is None:
+        comparison_fields = [0]
+
+    # Define comparison function
+    if custom_comparison is None:
+
+        def default_comparison(new_field: str, existing_field: str) -> bool:
+            return new_field.strip().lower() == existing_field.strip().lower()
+
+        comparison_func = default_comparison
+    else:
+        comparison_func = custom_comparison
+
+    # Find unique cards (not duplicates)
+    unique_cards = external_cards.where(
+        lambda external_card: not existing_collection.any(
+            lambda existing_card: any(
+                len(external_card.fields) > field_idx
+                and len(existing_card.fields) > field_idx
+                and comparison_func(
+                    external_card.fields[field_idx],
+                    existing_card.fields[field_idx],
+                )
+                for field_idx in comparison_fields
+            )
+        )
+    )
+
+    return Table.from_rows(list(unique_cards), AnkiCard)
