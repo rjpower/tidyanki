@@ -104,7 +104,7 @@ select = [
     "UP", # https://docs.astral.sh/ruff/rules/#pyupgrade-up
     "B", # https://docs.astral.sh/ruff/rules/#flake8-bugbear-b
     "I", # https://docs.astral.sh/ruff/rules/#isort-i
-    "TID",
+    "TID", # https://docs.astral.sh/ruff/rules/#flake8-tidy-imports
     # Other possibilities:
     # "D" # https://docs.astral.sh/ruff/rules/#pydocstyle-d
     # "Q" # https://docs.astral.sh/ruff/rules/#flake8-quotes-q
@@ -150,5 +150,5 @@ filterwarnings = []
 
  [tool.pyrefly]
  project-includes = ["**/*"]
- project-excludes = ["**/*venv/**/*", "tests/**/*"]
+ project-excludes = ["**/*venv/**/*", "tests/*.py"]
  

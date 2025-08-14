@@ -18,7 +18,7 @@ def main():
     errcount = 0
     errcount += run(["ruff", "check", "--fix", *SRC_PATHS])
     errcount += run(["ruff", "format", *SRC_PATHS])
-    errcount += run(["uvx", "pyrefly", "check", *SRC_PATHS])
+    errcount += run(["uvx", "pyrefly", "check"])
 
     rprint()
 

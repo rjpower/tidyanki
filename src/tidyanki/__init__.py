@@ -4,13 +4,16 @@ from tidyanki.core import *
 from tidyanki.models import *
 
 __all__ = [
-    # Tables
-    "AnkiDecksTable",
-    "AnkiCardsTable",
-    "AnkiCardsWithStatusTable",
+    # Table functions
+    "load_decks",
+    "load_cards",
+    "load_cards_with_status",
+    "load_notes",
+    "search_cards",
     # Models
     "AnkiDeck",
     "AnkiCard",
+    "AnkiNote",
     "AnkiCardWithStatus",
     "AnkiTemplate",
     "AnkiTemplateContent",
@@ -24,9 +27,9 @@ __all__ = [
     "create_vocab_cards",
     "generate_example_sentence",
     # Deduplication
-    "find_duplicate_cards",
-    "remove_duplicate_cards",
+    "remove_duplicate_notes",
     "analyze_deck_overlap",
+    "deduplicate_external_deck",
     # Export
     "export_cards_to_deck",
     "export_deduplicated_deck",

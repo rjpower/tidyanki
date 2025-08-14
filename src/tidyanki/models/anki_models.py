@@ -1,8 +1,52 @@
 """Pydantic models for Anki data structures."""
 
 from pathlib import Path
+from typing import Any
 
+import genanki
 from pydantic import BaseModel, Field
+
+
+class AnkiModel(BaseModel):
+    """Represents an Anki note type model."""
+
+    id: int
+    name: str
+    fields: list[dict[str, Any]]
+    templates: list[dict[str, Any]]
+    css: str = ""
+    original_data: dict[str, Any] = Field(default_factory=dict)
+
+    def to_genanki_model(self) -> genanki.Model:
+        """Convert to genanki Model for export."""
+        return genanki.Model(
+            model_id=self.id,
+            name=self.name,
+            fields=self.fields,
+            templates=self.templates,
+            css=self.css,
+        )
+
+    def __hash__(self) -> int:
+        """Hash based on model ID for deduplication."""
+        return hash(self.id)
+
+    def __eq__(self, other: object) -> bool:
+        """Equality based on model ID."""
+        if not isinstance(other, AnkiModel):
+            return False
+        return self.id == other.id
+
+
+class AnkiNote(BaseModel):
+    """Represents an Anki note from the database."""
+
+    id: int
+    guid: str
+    mid: int  # model ID (note type)
+    fields: list[str]
+    tags: list[str]
+    model: AnkiModel | None = None  # Reference to the actual model
 
 
 class AnkiCard(BaseModel):
@@ -13,6 +57,8 @@ class AnkiCard(BaseModel):
     tags: list[str]
     card_type: int
     deck_name: str
+    model: AnkiModel | None = None
+    note_id: int | None = None  # ID of the source note
 
 
 class AnkiDeck(BaseModel):

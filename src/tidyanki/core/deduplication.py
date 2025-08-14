@@ -1,96 +1,97 @@
 """Deck deduplication functionality."""
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 
 from tidylinq import Table
 
-from tidyanki.models.anki_models import AnkiCard
+from tidyanki.core.import_apkg import load_notes_from_apkg
+from tidyanki.core.tables import load_notes
+from tidyanki.models.anki_models import AnkiNote
 
-from .import_apkg import load_cards_from_apkg
-from .tables import AnkiCardsTable
+IGNORED_WORDS = {"item", "sentence", "plain"}
 
 
-def find_duplicate_cards(
-    new_deck_name: str,
-    existing_collection: Table[AnkiCard] | None = None,
-    comparison_field_index: int = 0,
-    custom_comparison: Callable[[str, str], bool] | None = None,
-) -> Table[AnkiCard]:
-    """Find cards in new deck that already exist in the collection.
+def normalize_and_split(text: str, max_word_length: int = 20) -> set[str]:
+    """Normalize text and split into words for comparison.
 
     Args:
-        new_deck_name: Name of the new deck to check for duplicates
-        existing_collection: Optional pre-loaded collection cards. If None, loads all cards.
-        comparison_field_index: Which field index to compare (default: 0 for first field)
-        custom_comparison: Optional custom comparison function
+        text: Input text to normalize and split
+        max_word_length: Maximum word length to include (filters out sentences)
 
     Returns:
-        Table of duplicate cards
+        Set of normalized words
     """
-    # Load new deck cards
-    new_cards = AnkiCardsTable.load(deck_name=new_deck_name)
-
-    # Load existing collection if not provided
-    if existing_collection is None:
-        existing_collection = AnkiCardsTable.load()
-
-    # Filter out cards from the new deck itself from existing collection
-    existing_cards = existing_collection.where(lambda card: card.deck_name != new_deck_name)
-
-    # Define comparison function
-    if custom_comparison is None:
-
-        def default_comparison(new_field: str, existing_field: str) -> bool:
-            return new_field.strip().lower() == existing_field.strip().lower()
-
-        comparison_func = default_comparison
-    else:
-        comparison_func = custom_comparison
-
-    # Find duplicates
-    duplicates = new_cards.where(
-        lambda new_card: existing_cards.any(
-            lambda existing_card: (
-                len(new_card.fields) > comparison_field_index
-                and len(existing_card.fields) > comparison_field_index
-                and comparison_func(
-                    new_card.fields[comparison_field_index],
-                    existing_card.fields[comparison_field_index],
-                )
-            )
-        )
-    )
-
-    return Table.from_rows(list(duplicates), AnkiCard)
+    text = re.sub(r"<[^>]+>", "", text)
+    words = re.split(r"[,;|]", text.lower().strip())
+    words = [word.strip() for word in words if word.strip()]
+    words = [word for word in words if word not in IGNORED_WORDS]
+    return {word for word in words if len(word) <= max_word_length}
 
 
-def remove_duplicate_cards(
+def build_collection_word_set(collection: Table[AnkiNote]) -> set[str]:
+    """Build a set of all words from collection notes.
+
+    Args:
+        collection: Table of collection notes
+
+    Returns:
+        Set of all words found in collection note fields
+    """
+    word_set = set()
+    for note in collection:
+        for field in note.fields:
+            word_set.update(normalize_and_split(field))
+    return word_set
+
+
+def notes_match_auto(external_note: AnkiNote, collection_word_set: set[str]) -> bool:
+    """Check if note matches any collection notes using word intersection.
+
+    Args:
+        external_note: Note from external deck
+        collection_word_set: Set of all words from collection notes
+
+    Returns:
+        True if note has word overlap with collection
+    """
+    for field in external_note.fields:
+        intersection = normalize_and_split(field).intersection(collection_word_set)
+        if intersection:
+            return True
+
+    return False
+
+
+def remove_duplicate_notes(
     new_deck_name: str,
-    existing_collection: Table[AnkiCard] | None = None,
+    existing_collection: Table[AnkiNote] | None = None,
     comparison_field_index: int = 0,
     custom_comparison: Callable[[str, str], bool] | None = None,
-) -> Table[AnkiCard]:
-    """Remove cards from new deck that already exist in the collection.
+) -> Table[AnkiNote]:
+    """Remove notes from new deck that already exist in the collection.
 
     Args:
         new_deck_name: Name of the new deck to deduplicate
-        existing_collection: Optional pre-loaded collection cards. If None, loads all cards.
+        existing_collection: Optional pre-loaded collection notes. If None, loads all notes.
         comparison_field_index: Which field index to compare (default: 0 for first field)
         custom_comparison: Optional custom comparison function
 
     Returns:
-        Table of unique cards (cards that don't exist in collection)
+        Table of unique notes (notes that don't exist in collection)
     """
-    # Load new deck cards
-    new_cards = AnkiCardsTable.load(deck_name=new_deck_name)
+    # Load new deck notes
+    new_notes = load_notes(deck_name=new_deck_name)
 
     # Load existing collection if not provided
     if existing_collection is None:
-        existing_collection = AnkiCardsTable.load()
+        existing_collection = load_notes()
 
-    # Filter out cards from the new deck itself from existing collection
-    existing_cards = existing_collection.where(lambda card: card.deck_name != new_deck_name)
+    # Filter out notes from the new deck itself from existing collection
+    existing_notes = existing_collection.where(
+        lambda note: note.id not in {n.id for n in new_notes}
+    )
 
     # Define comparison function
     if custom_comparison is None:
@@ -102,25 +103,25 @@ def remove_duplicate_cards(
     else:
         comparison_func = custom_comparison
 
-    # Find unique cards (not duplicates)
-    unique_cards = new_cards.where(
-        lambda new_card: not existing_cards.any(
-            lambda existing_card: (
-                len(new_card.fields) > comparison_field_index
-                and len(existing_card.fields) > comparison_field_index
+    # Find unique notes (not duplicates)
+    unique_notes = new_notes.where(
+        lambda new_note: not existing_notes.any(
+            lambda existing_note: (
+                len(new_note.fields) > comparison_field_index
+                and len(existing_note.fields) > comparison_field_index
                 and comparison_func(
-                    new_card.fields[comparison_field_index],
-                    existing_card.fields[comparison_field_index],
+                    new_note.fields[comparison_field_index],
+                    existing_note.fields[comparison_field_index],
                 )
             )
         )
     )
 
-    return Table.from_rows(list(unique_cards), AnkiCard)
+    return Table.from_rows(list(unique_notes), AnkiNote)
 
 
 def analyze_deck_overlap(deck1_name: str, deck2_name: str, comparison_field_index: int = 0) -> dict:
-    """Analyze overlap between two decks.
+    """Analyze overlap between two decks based on notes.
 
     Args:
         deck1_name: Name of first deck
@@ -130,157 +131,76 @@ def analyze_deck_overlap(deck1_name: str, deck2_name: str, comparison_field_inde
     Returns:
         Dictionary with overlap statistics
     """
-    deck1_cards = AnkiCardsTable.load(deck_name=deck1_name)
-    deck2_cards = AnkiCardsTable.load(deck_name=deck2_name)
+    deck1_notes = load_notes(deck_name=deck1_name)
+    deck2_notes = load_notes(deck_name=deck2_name)
 
-    # Find cards in deck1 that are also in deck2
-    deck1_in_deck2 = deck1_cards.where(
-        lambda card1: deck2_cards.any(
-            lambda card2: (
-                len(card1.fields) > comparison_field_index
-                and len(card2.fields) > comparison_field_index
-                and card1.fields[comparison_field_index].strip().lower()
-                == card2.fields[comparison_field_index].strip().lower()
+    # Find notes in deck1 that are also in deck2
+    deck1_in_deck2 = deck1_notes.where(
+        lambda note1: deck2_notes.any(
+            lambda note2: (
+                len(note1.fields) > comparison_field_index
+                and len(note2.fields) > comparison_field_index
+                and note1.fields[comparison_field_index].strip().lower()
+                == note2.fields[comparison_field_index].strip().lower()
             )
         )
     )
 
-    # Find cards in deck2 that are also in deck1
-    deck2_cards.where(
-        lambda card2: deck1_cards.any(
-            lambda card1: (
-                len(card1.fields) > comparison_field_index
-                and len(card2.fields) > comparison_field_index
-                and card1.fields[comparison_field_index].strip().lower()
-                == card2.fields[comparison_field_index].strip().lower()
+    # Find notes in deck2 that are also in deck1
+    deck2_notes.where(
+        lambda note2: deck1_notes.any(
+            lambda note1: (
+                len(note1.fields) > comparison_field_index
+                and len(note2.fields) > comparison_field_index
+                and note1.fields[comparison_field_index].strip().lower()
+                == note2.fields[comparison_field_index].strip().lower()
             )
         )
     )
 
-    deck1_total = deck1_cards.count()
-    deck2_total = deck2_cards.count()
+    deck1_total = deck1_notes.count()
+    deck2_total = deck2_notes.count()
     overlap_count = deck1_in_deck2.count()
 
     return {
         "deck1_name": deck1_name,
         "deck2_name": deck2_name,
-        "deck1_total_cards": deck1_total,
-        "deck2_total_cards": deck2_total,
-        "overlap_cards": overlap_count,
-        "deck1_unique_cards": deck1_total - overlap_count,
-        "deck2_unique_cards": deck2_total - overlap_count,
+        "deck1_total_notes": deck1_total,
+        "deck2_total_notes": deck2_total,
+        "overlap_notes": overlap_count,
+        "deck1_unique_notes": deck1_total - overlap_count,
+        "deck2_unique_notes": deck2_total - overlap_count,
         "overlap_percentage_deck1": (overlap_count / deck1_total * 100) if deck1_total > 0 else 0,
         "overlap_percentage_deck2": (overlap_count / deck2_total * 100) if deck2_total > 0 else 0,
     }
 
 
-def find_external_deck_duplicates(
-    apkg_path: Path,
-    existing_collection: Table[AnkiCard] | None = None,
-    comparison_fields: list[int] | None = None,
-    custom_comparison: Callable[[str, str], bool] | None = None,
-) -> Table[AnkiCard]:
-    """Find cards in external .apkg file that already exist in the collection.
-
-    Args:
-        apkg_path: Path to the .apkg file to check for duplicates
-        existing_collection: Optional pre-loaded collection cards. If None, loads all cards.
-        comparison_fields: Which field indices to compare (default: [0] for first field only)
-        custom_comparison: Optional custom comparison function
-
-    Returns:
-        Table of duplicate cards from the external deck
-    """
-    # Load cards from .apkg file
-    external_cards = load_cards_from_apkg(apkg_path)
-
-    # Load existing collection if not provided
-    if existing_collection is None:
-        existing_collection = AnkiCardsTable.load()
-
-    # Set default comparison fields
-    if comparison_fields is None:
-        comparison_fields = [0]
-
-    # Define comparison function
-    if custom_comparison is None:
-
-        def default_comparison(new_field: str, existing_field: str) -> bool:
-            return new_field.strip().lower() == existing_field.strip().lower()
-
-        comparison_func = default_comparison
-    else:
-        comparison_func = custom_comparison
-
-    # Find duplicates by checking if any comparison field matches
-    duplicates = external_cards.where(
-        lambda external_card: existing_collection.any(
-            lambda existing_card: any(
-                len(external_card.fields) > field_idx
-                and len(existing_card.fields) > field_idx
-                and comparison_func(
-                    external_card.fields[field_idx],
-                    existing_card.fields[field_idx],
-                )
-                for field_idx in comparison_fields
-            )
-        )
-    )
-
-    return Table.from_rows(list(duplicates), AnkiCard)
-
-
 def deduplicate_external_deck(
     apkg_path: Path,
-    existing_collection: Table[AnkiCard] | None = None,
-    comparison_fields: list[int] | None = None,
-    custom_comparison: Callable[[str, str], bool] | None = None,
-) -> Table[AnkiCard]:
-    """Remove cards from external .apkg file that already exist in the collection.
+    existing_collection: Table[AnkiNote] | None = None,
+) -> Table[AnkiNote]:
+    """Remove notes from external .apkg file that already exist in the collection.
 
     Args:
         apkg_path: Path to the .apkg file to deduplicate
-        existing_collection: Optional pre-loaded collection cards. If None, loads all cards.
-        comparison_fields: Which field indices to compare (default: [0] for first field only)
-        custom_comparison: Optional custom comparison function
+        existing_collection: Optional pre-loaded collection notes. If None, loads all notes.
 
     Returns:
-        Table of unique cards (cards that don't exist in collection)
+        Table of unique notes (notes that don't exist in collection)
     """
-    # Load cards from .apkg file
-    external_cards = load_cards_from_apkg(apkg_path)
+    # Load notes from .apkg file
+    external_notes = load_notes_from_apkg(apkg_path)
 
     # Load existing collection if not provided
     if existing_collection is None:
-        existing_collection = AnkiCardsTable.load()
+        existing_collection = load_notes()
 
-    # Set default comparison fields
-    if comparison_fields is None:
-        comparison_fields = [0]
+    # Build word set from collection once
+    collection_word_set = build_collection_word_set(existing_collection)
 
-    # Define comparison function
-    if custom_comparison is None:
-
-        def default_comparison(new_field: str, existing_field: str) -> bool:
-            return new_field.strip().lower() == existing_field.strip().lower()
-
-        comparison_func = default_comparison
-    else:
-        comparison_func = custom_comparison
-
-    # Find unique cards (not duplicates)
-    unique_cards = external_cards.where(
-        lambda external_card: not existing_collection.any(
-            lambda existing_card: any(
-                len(external_card.fields) > field_idx
-                and len(existing_card.fields) > field_idx
-                and comparison_func(
-                    external_card.fields[field_idx],
-                    existing_card.fields[field_idx],
-                )
-                for field_idx in comparison_fields
-            )
-        )
+    # Find unique notes (not duplicates) using word intersection
+    unique_notes = external_notes.where(
+        lambda external_note: not notes_match_auto(external_note, collection_word_set)
     )
 
-    return Table.from_rows(list(unique_cards), AnkiCard)
+    return Table.from_rows(list(unique_notes), AnkiNote)
