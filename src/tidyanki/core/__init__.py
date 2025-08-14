@@ -2,7 +2,7 @@
 
 from .anki_db import get_anki_db_path, setup_anki_connection
 from .deduplication import analyze_deck_overlap, deduplicate_external_deck, remove_duplicate_notes
-from .export import export_cards_to_deck
+from .export import export_notes_to_deck
 from .operations import (
     create_vocab_cards,
     generate_example_sentence,
@@ -26,5 +26,5 @@ __all__ = [
     "remove_duplicate_notes",
     "deduplicate_external_deck",
     "analyze_deck_overlap",
-    "export_cards_to_deck",
+    "export_notes_to_deck",
 ]

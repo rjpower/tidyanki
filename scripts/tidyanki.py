@@ -2,20 +2,15 @@
 """Main CLI interface for tidyanki."""
 
 import argparse
-import sys
-import tempfile
 from pathlib import Path
 
 from tidyanki.core.deduplication import (
     analyze_deck_overlap,
     deduplicate_external_deck,
 )
-from tidyanki.core.export import export_cards_to_deck
+from tidyanki.core.export import export_notes_to_deck
 from tidyanki.core.import_apkg import (
-    extract_media_files,
     get_apkg_deck_names,
-    load_cards_from_apkg,
-    load_media_from_apkg,
     load_models_from_apkg,
     load_notes_from_apkg,
 )
@@ -77,51 +72,21 @@ def import_deduplicate(input_apkg: str, output_path: Path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
     print(f"Loading notes from {input_path}...")
-
-    # Load notes, cards with models, and media from the .apkg file
-    external_notes = load_notes_from_apkg(input_path)
-    external_cards, models = load_cards_from_apkg(input_path)
-    media_files = load_media_from_apkg(input_path)
-    
-    print(f"Found {external_notes.count()} notes in external deck")
-    print(f"Found {external_cards.count()} cards in external deck")
-    print(f"Found {len(models)} models in external deck")
-    print(f"Found {len(media_files)} media files in external deck")
-
-    print("Using automatic word overlap detection across all fields...")
-
-    # Load collection to show progress
     collection = load_notes()
     print(f"Comparing against {collection.count()} notes in your collection...")
 
-    # Calculate duplicates by comparing total vs unique
     unique_notes = deduplicate_external_deck(input_path, collection)
-    duplicates_count = external_notes.count() - unique_notes.count()
-    print(f"Found {duplicates_count} duplicate notes in collection")
-
     print(f"Found {unique_notes.count()} unique notes to export")
 
     if unique_notes.count() == 0:
         print("No unique notes to export!")
         return
 
-    # Filter cards that belong to unique notes
-    unique_note_ids = {note.id for note in unique_notes}
-    unique_cards = external_cards.where(
-        lambda card: card.note_id in unique_note_ids
+    result = export_notes_to_deck(
+        notes=unique_notes,
+        deck_name=f"{input_path.stem} (Deduplicated)",
+        output_path=Path(output_path),
     )
-
-    # Extract media files to temp directory for inclusion in export
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-        extracted_media = extract_media_files(input_path, temp_path)
-
-        result = export_cards_to_deck(
-            cards=unique_cards,
-            deck_name=f"{input_path.stem} (Deduplicated)",
-            output_path=Path(output_path),
-            media_files=[str(f) for f in extracted_media] if extracted_media else None,
-        )
 
     print(
         f"Exported {result.cards_created} cards from {unique_notes.count()} unique notes to {result.deck_path}"
@@ -140,12 +105,15 @@ def inspect_apkg(apkg_file: str):
     deck_names = get_apkg_deck_names(apkg_path)
     print(f"Deck names: {', '.join(deck_names)}")
 
-    # Load and show sample notes and cards
+    # Load and show sample notes
     notes = load_notes_from_apkg(apkg_path)
-    cards, models = load_cards_from_apkg(apkg_path)
+    models = load_models_from_apkg(apkg_path)
     print(f"Total notes: {notes.count()}")
-    print(f"Total cards: {cards.count()}")
     print(f"Total models: {len(models)}")
+
+    # Estimate total cards from notes and their models
+    total_cards = sum(len(note.model.templates) for note in notes.to_list() if note.model)
+    print(f"Estimated total cards: {total_cards}")
 
     if notes.count() > 0:
         sample_notes = notes.take(5).to_list()

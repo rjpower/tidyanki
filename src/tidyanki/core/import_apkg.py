@@ -1,6 +1,7 @@
 """Import cards from .apkg files."""
 
 import json
+import logging
 import re
 import sqlite3
 import tempfile
@@ -9,7 +10,32 @@ from pathlib import Path
 
 from tidylinq import Table
 
-from tidyanki.models.anki_models import AnkiCard, AnkiModel, AnkiNote
+from tidyanki.models.anki_models import AnkiModel, AnkiNote, MediaFile
+
+logger = logging.getLogger(__name__)
+
+
+def detect_media_in_fields(fields: list[str]) -> list[str]:
+    """Detect media file references in card fields.
+
+    Args:
+        fields: List of field contents
+
+    Returns:
+        List of media file names referenced in the fields
+    """
+    media_files = []
+
+    for field in fields:
+        # Find image references: <img src="filename.jpg">
+        img_matches = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', field, re.IGNORECASE)
+        media_files.extend(img_matches)
+
+        # Find audio references: [sound:filename.mp3]
+        audio_matches = re.findall(r"\[sound:([^\]]+)\]", field, re.IGNORECASE)
+        media_files.extend(audio_matches)
+
+    return list(set(media_files))  # Remove duplicates
 
 
 def load_models_from_db(conn: sqlite3.Connection) -> dict[int, AnkiModel]:
@@ -42,13 +68,13 @@ def load_models_from_db(conn: sqlite3.Connection) -> dict[int, AnkiModel]:
 
 
 def load_notes_from_apkg(apkg_path: Path) -> Table[AnkiNote]:
-    """Load notes from an .apkg file.
+    """Load notes from an .apkg file with models and media references attached.
 
     Args:
         apkg_path: Path to the .apkg file to load notes from
 
     Returns:
-        Table of AnkiNote objects from the package
+        Table of AnkiNote objects from the package with full model and media info
     """
     if not apkg_path.exists():
         raise FileNotFoundError(f"APKG file not found: {apkg_path}")
@@ -64,15 +90,13 @@ def load_notes_from_apkg(apkg_path: Path) -> Table[AnkiNote]:
 
         # Find the collection database file
         collection_db = temp_path / "collection.anki2"
-        if not collection_db.exists():
-            # Try alternative name
-            collection_db = temp_path / "collection.anki21"
-            if not collection_db.exists():
-                raise ValueError(f"No Anki database found in {apkg_path}")
 
         # Connect to the database and extract notes
         with sqlite3.connect(collection_db) as conn:
             conn.row_factory = sqlite3.Row
+
+            # Load models first
+            models = load_models_from_db(conn)
 
             # Get notes directly
             cursor = conn.execute("""
@@ -83,99 +107,43 @@ def load_notes_from_apkg(apkg_path: Path) -> Table[AnkiNote]:
 
             rows = cursor.fetchall()
 
+            # Load media files from ZIP into memory
+            # mapping from disk filename to media ID
+            media_mapping: dict[str, str] = json.loads((temp_path / "media").read_text())
+            media_data = {}
+            with zipfile.ZipFile(apkg_path, "r") as zip_file:
+                for file_info in zip_file.filelist:
+                    filename = file_info.filename
+                    if filename not in ["collection.anki2", "collection.anki21", "media"]:
+                        media_data[media_mapping[filename]] = zip_file.read(filename)
+
             for row in rows:
                 fields = row["flds"].split("\x1f")  # Anki field separator
+                model_id = row["mid"]
+                model = models[model_id]
+                media_filenames = detect_media_in_fields(fields)
+
+                # Create MediaFile objects with actual data
+                media_files = []
+                for filename in media_filenames:
+                    if filename in media_data:
+                        media_files.append(MediaFile(filename=filename, data=media_data[filename]))
+                    else:
+                        logger.warning(f"Media file not found: {filename}")
 
                 notes.append(
                     AnkiNote(
                         id=row["id"],
                         guid=row["guid"],
-                        mid=row["mid"],
+                        mid=model_id,
                         fields=fields,
                         tags=row["tags"].split() if row["tags"] else [],
+                        model=model,
+                        media_files=media_files,
                     )
                 )
 
     return Table.from_rows(notes, AnkiNote)
-
-
-def load_cards_from_apkg(apkg_path: Path) -> tuple[Table[AnkiCard], dict[int, AnkiModel]]:
-    """Load cards from an .apkg file.
-
-    Args:
-        apkg_path: Path to the .apkg file to load cards from
-
-    Returns:
-        Tuple of (Table of AnkiCard objects, dict of models)
-    """
-    if not apkg_path.exists():
-        raise FileNotFoundError(f"APKG file not found: {apkg_path}")
-
-    cards = []
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-
-        # Extract the .apkg file (it's a ZIP archive)
-        with zipfile.ZipFile(apkg_path, "r") as zip_file:
-            zip_file.extractall(temp_path)
-
-        # Find the collection database file
-        collection_db = temp_path / "collection.anki2"
-        if not collection_db.exists():
-            # Try alternative name
-            collection_db = temp_path / "collection.anki21"
-            if not collection_db.exists():
-                raise ValueError(f"No Anki database found in {apkg_path}")
-
-        # Connect to the database and extract cards
-        with sqlite3.connect(collection_db) as conn:
-            conn.row_factory = sqlite3.Row
-
-            # First, get deck information from the col table
-            cursor = conn.execute("SELECT decks FROM col LIMIT 1")
-            row = cursor.fetchone()
-            decks_json = row["decks"]
-            decks_dict = json.loads(decks_json)
-
-            # Create deck_id -> deck_name mapping
-            deck_mapping = {}
-            for deck_id, deck_info in decks_dict.items():
-                deck_mapping[int(deck_id)] = deck_info["name"]
-
-            # Load models using shared function
-            models = load_models_from_db(conn)
-
-            # Now get cards with deck info and model ID
-            cursor = conn.execute("""
-                SELECT c.id, c.did, n.flds, n.tags, c.ord, c.type, n.mid, c.nid
-                FROM cards c 
-                JOIN notes n ON c.nid = n.id
-                ORDER BY c.id
-            """)
-
-            rows = cursor.fetchall()
-
-            for row in rows:
-                fields = row["flds"].split("\x1f")  # Anki field separator
-                deck_name = deck_mapping.get(row["did"], f"Unknown Deck {row['did']}")
-
-                model_id = row["mid"]
-                model = models[model_id]
-
-                cards.append(
-                    AnkiCard(
-                        id=row["id"],
-                        fields=fields,
-                        tags=row["tags"].split() if row["tags"] else [],
-                        card_type=row["ord"],
-                        deck_name=deck_name,
-                        model=model,
-                        note_id=row["nid"],
-                    )
-                )
-
-    return Table.from_rows(cards, AnkiCard), models
 
 
 def get_apkg_deck_names(apkg_path: Path) -> list[str]:
@@ -304,26 +272,3 @@ def extract_media_files(apkg_path: Path, dest_dir: Path) -> list[Path]:
                 extracted_files.append(dest_dir / filename)
 
     return extracted_files
-
-
-def detect_media_in_fields(fields: list[str]) -> list[str]:
-    """Detect media file references in card fields.
-
-    Args:
-        fields: List of field contents
-
-    Returns:
-        List of media file names referenced in the fields
-    """
-    media_files = []
-
-    for field in fields:
-        # Find image references: <img src="filename.jpg">
-        img_matches = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', field, re.IGNORECASE)
-        media_files.extend(img_matches)
-
-        # Find audio references: [sound:filename.mp3]
-        audio_matches = re.findall(r"\[sound:([^\]]+)\]", field, re.IGNORECASE)
-        media_files.extend(audio_matches)
-
-    return list(set(media_files))  # Remove duplicates

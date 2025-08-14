@@ -3,14 +3,13 @@
 import tempfile
 from pathlib import Path
 
-from tidyanki.core.export import export_cards_to_deck
+from tidyanki.core.export import export_notes_to_deck
 from tidyanki.core.import_apkg import (
-    extract_media_files,
-    load_cards_from_apkg,
     load_media_from_apkg,
+    load_models_from_apkg,
     load_notes_from_apkg,
 )
-from tidyanki.models.anki_models import AnkiCard
+from tidyanki.models.anki_models import AnkiNote
 
 
 def test_apkg_model_preservation():
@@ -21,42 +20,34 @@ def test_apkg_model_preservation():
 
     # Load original data
     original_notes = load_notes_from_apkg(apkg_path)
-    original_cards, original_models = load_cards_from_apkg(apkg_path)
+    original_models = load_models_from_apkg(apkg_path)
     original_media = load_media_from_apkg(apkg_path)
 
     print("Original file has:")
     print(f"  Notes: {original_notes.count()}")
-    print(f"  Cards: {original_cards.count()}")
     print(f"  Models: {len(original_models)}")
     print(f"  Media files: {len(original_media)}")
 
     # Verify we have data to work with
     assert original_notes.count() > 0, "Should have notes"
-    assert original_cards.count() > 0, "Should have cards"
     assert len(original_models) > 0, "Should have models"
 
-    # Verify cards have model references
-    card_list: list[AnkiCard] = original_cards.to_list()
-    for card in card_list:
-        assert card.model is not None, f"Card {card.id} should have model reference"
-        print(f"  Card {card.id} uses model: {card.model.name}")
+    # Verify notes have model references
+    note_list: list[AnkiNote] = original_notes.to_list()
+    for note in note_list:
+        assert note.model is not None, f"Note {note.id} should have model reference"
+        print(f"  Note {note.id} uses model: {note.model.name}")
 
     # Test export with preservation
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
 
-        # Extract media files if any
-        extracted_media = []
-        if original_media:
-            extracted_media = extract_media_files(apkg_path, temp_path)
-
-        # Export all cards (no filtering)
+        # Export all notes (no filtering)
         output_path = temp_path / "exported_seinfeld.apkg"
-        result = export_cards_to_deck(
-            cards=original_cards,
+        result = export_notes_to_deck(
+            notes=original_notes,
             deck_name="Exported Seinfeld",
             output_path=output_path,
-            media_files=[str(f) for f in extracted_media] if extracted_media else None,
         )
 
         print(f"\nExported to: {result.deck_path}")
@@ -65,21 +56,19 @@ def test_apkg_model_preservation():
 
         # Verify export file exists
         assert output_path.exists(), "Export file should exist"
-        assert result.cards_created == original_cards.count(), "Should export all cards"
 
         # Re-import the exported file to verify preservation
         reimported_notes = load_notes_from_apkg(output_path)
-        reimported_cards, reimported_models = load_cards_from_apkg(output_path)
+        reimported_models = load_models_from_apkg(output_path)
         reimported_media = load_media_from_apkg(output_path)
 
         print("\nRe-imported file has:")
         print(f"  Notes: {reimported_notes.count()}")
-        print(f"  Cards: {reimported_cards.count()}")
         print(f"  Models: {len(reimported_models)}")
         print(f"  Media files: {len(reimported_media)}")
 
         # Verify preservation
-        assert reimported_cards.count() == original_cards.count(), "Card count should match"
+        assert reimported_notes.count() == original_notes.count(), "Note count should match"
         assert len(reimported_models) == len(original_models), "Model count should match"
 
         # Verify model details are preserved
@@ -97,30 +86,30 @@ def test_apkg_model_preservation():
 
             print(f"  ✓ Model {model_id} ({original_model.name}) preserved correctly")
 
-        # Verify cards have correct model references AND content
-        reimported_card_list = reimported_cards.to_list()
-        for i, (orig_card, reimp_card) in enumerate(
-            zip(card_list, reimported_card_list, strict=False)
+        # Verify notes have correct model references AND content
+        reimported_note_list = reimported_notes.to_list()
+        for i, (orig_note, reimp_note) in enumerate(
+            zip(note_list, reimported_note_list, strict=False)
         ):
-            assert orig_card.model is not None, "Original card should have model reference"
-            assert reimp_card.model is not None, "Reimported card should have model reference"
-            assert reimp_card.model.name == orig_card.model.name, "Model names should match"
+            assert orig_note.model is not None, "Original note should have model reference"
+            assert reimp_note.model is not None, "Reimported note should have model reference"
+            assert reimp_note.model.name == orig_note.model.name, "Model names should match"
 
             # Validate actual field content is preserved
-            assert len(reimp_card.fields) == len(orig_card.fields), (
-                f"Card {i + 1} field count should match"
+            assert len(reimp_note.fields) == len(orig_note.fields), (
+                f"Note {i + 1} field count should match"
             )
             for j, (orig_field, reimp_field) in enumerate(
-                zip(orig_card.fields, reimp_card.fields, strict=False)
+                zip(orig_note.fields, reimp_note.fields, strict=False)
             ):
                 assert orig_field == reimp_field, (
-                    f"Card {i + 1} field {j} content should match: '{orig_field}' vs '{reimp_field}'"
+                    f"Note {i + 1} field {j} content should match: '{orig_field}' vs '{reimp_field}'"
                 )
 
             # Validate tags are preserved
-            assert set(reimp_card.tags) == set(orig_card.tags), f"Card {i + 1} tags should match"
+            assert set(reimp_note.tags) == set(orig_note.tags), f"Note {i + 1} tags should match"
 
-            print(f"  ✓ Card {i + 1} content and model preserved: {reimp_card.model.name}")
+            print(f"  ✓ Note {i + 1} content and model preserved: {reimp_note.model.name}")
 
         # Deep validation: Check that model templates are identical
         for model_id, original_model in original_models.items():
@@ -168,20 +157,21 @@ def test_filtering_preserves_models():
     assert apkg_path.exists(), f"Test file not found: {apkg_path}"
 
     # Load original data
-    original_cards, original_models = load_cards_from_apkg(apkg_path)
+    original_notes = load_notes_from_apkg(apkg_path)
+    original_models = load_models_from_apkg(apkg_path)
 
-    # Filter to just first 10 cards
-    filtered_cards = original_cards.take(10)
+    # Filter to just first 10 notes
+    filtered_notes = original_notes.take(10)
 
     print("\nFiltering test:")
-    print(f"  Original cards: {original_cards.count()}")
-    print(f"  Filtered cards: {filtered_cards.count()}")
+    print(f"  Original notes: {original_notes.count()}")
+    print(f"  Filtered notes: {filtered_notes.count()}")
 
     # Export filtered set
     with tempfile.TemporaryDirectory() as temp_dir:
         output_path = Path(temp_dir) / "filtered_seinfeld.apkg"
-        result = export_cards_to_deck(
-            cards=filtered_cards,
+        result = export_notes_to_deck(
+            notes=filtered_notes,
             deck_name="Filtered Seinfeld",
             output_path=output_path,
         )
@@ -189,16 +179,17 @@ def test_filtering_preserves_models():
         print(f"  Exported cards: {result.cards_created}")
 
         # Verify filtered export
-        reimported_cards, reimported_models = load_cards_from_apkg(output_path)
+        reimported_notes = load_notes_from_apkg(output_path)
+        reimported_models = load_models_from_apkg(output_path)
 
-        assert reimported_cards.count() == 10, "Should have 10 filtered cards"
+        assert reimported_notes.count() == 10, "Should have 10 filtered notes"
         assert len(reimported_models) > 0, "Should still have models"
 
         # Verify models are still correct
-        reimported_card_list = reimported_cards.to_list()
-        for card in reimported_card_list:
-            assert card.model is not None, "Filtered card should have model reference"
-            assert card.model.name in [m.name for m in original_models.values()], (
+        reimported_note_list = reimported_notes.to_list()
+        for note in reimported_note_list:
+            assert note.model is not None, "Filtered note should have model reference"
+            assert note.model.name in [m.name for m in original_models.values()], (
                 "Should use original model"
             )
 

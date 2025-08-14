@@ -177,7 +177,7 @@ def analyze_deck_overlap(deck1_name: str, deck2_name: str, comparison_field_inde
 
 def deduplicate_external_deck(
     apkg_path: Path,
-    existing_collection: Table[AnkiNote] | None = None,
+    existing_collection: Table[AnkiNote],
 ) -> Table[AnkiNote]:
     """Remove notes from external .apkg file that already exist in the collection.
 
@@ -190,12 +190,6 @@ def deduplicate_external_deck(
     """
     # Load notes from .apkg file
     external_notes = load_notes_from_apkg(apkg_path)
-
-    # Load existing collection if not provided
-    if existing_collection is None:
-        existing_collection = load_notes()
-
-    # Build word set from collection once
     collection_word_set = build_collection_word_set(existing_collection)
 
     # Find unique notes (not duplicates) using word intersection
