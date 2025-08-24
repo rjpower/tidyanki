@@ -5,7 +5,7 @@ from tidylinq import Table
 from tidyanki.core.deduplication import (
     build_collection_word_set,
     normalize_and_split,
-    notes_match_auto,
+    note_matches_collection,
 )
 from tidyanki.models.anki_models import AnkiNote
 
@@ -63,13 +63,13 @@ def test_notes_match_auto():
 
     # Test matching note
     matching_note = AnkiNote(id=1, guid="guid1", mid=123, fields=["apple", "green fruit"], tags=[])
-    assert notes_match_auto(matching_note, collection_words) is True
+    assert note_matches_collection(matching_note, collection_words) is True
 
     # Test non-matching note
     non_matching_note = AnkiNote(
         id=2, guid="guid2", mid=123, fields=["orange juice", "citrus drink"], tags=[]
     )
-    assert notes_match_auto(non_matching_note, collection_words) is False
+    assert note_matches_collection(non_matching_note, collection_words) is False
 
 
 def test_notes_match_auto_with_ignored_words():
@@ -80,7 +80,7 @@ def test_notes_match_auto_with_ignored_words():
     note_with_ignored = AnkiNote(
         id=1, guid="guid1", mid=123, fields=["item", "sentence", "plain"], tags=[]
     )
-    assert notes_match_auto(note_with_ignored, collection_words) is False
+    assert note_matches_collection(note_with_ignored, collection_words) is False
 
 
 def test_empty_fields_handling():
@@ -88,7 +88,7 @@ def test_empty_fields_handling():
     collection_words = {"apple", "pie"}
 
     empty_note = AnkiNote(id=1, guid="guid1", mid=123, fields=["", ""], tags=[])
-    assert notes_match_auto(empty_note, collection_words) is False
+    assert note_matches_collection(empty_note, collection_words) is False
 
 
 def test_case_insensitive_matching():
@@ -96,4 +96,4 @@ def test_case_insensitive_matching():
     collection_words = {"apple", "pie"}
 
     mixed_case_note = AnkiNote(id=1, guid="guid1", mid=123, fields=["APPLE", "PIE"], tags=[])
-    assert notes_match_auto(mixed_case_note, collection_words) is True
+    assert note_matches_collection(mixed_case_note, collection_words) is True

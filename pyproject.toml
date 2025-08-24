@@ -42,6 +42,7 @@ dependencies = [
     "tidylinq>=0.0.1",
     "genanki>=0.13.0",
     "unidecode>=1.3.0",
+    "tidyapp @ git+https://github.com/rjpower/tidyapp.git",
 ]
 
 

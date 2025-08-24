@@ -27,13 +27,8 @@ __all__ = [
     "create_vocab_cards",
     "generate_example_sentence",
     # Deduplication
-    "remove_duplicate_notes",
     "analyze_deck_overlap",
     "deduplicate_external_deck",
-    # Export
-    "export_cards_to_deck",
-    "export_deduplicated_deck",
-    "export_filtered_deck",
     # Database
     "setup_anki_connection",
     "get_anki_db_path",

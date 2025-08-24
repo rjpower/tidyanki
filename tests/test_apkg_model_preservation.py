@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from tidyanki.core.export import export_notes_to_deck
+from tidyanki.core.export_apkg import export_notes_to_deck
 from tidyanki.core.import_apkg import (
     load_media_from_apkg,
     load_models_from_apkg,

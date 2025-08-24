@@ -1,5 +1,6 @@
 """Deck deduplication functionality."""
 
+import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -10,7 +11,15 @@ from tidyanki.core.import_apkg import load_notes_from_apkg
 from tidyanki.core.tables import load_notes
 from tidyanki.models.anki_models import AnkiNote
 
-IGNORED_WORDS = {"item", "sentence", "plain"}
+IGNORED_WORDS = {"item", "sentence", "plain", "verb"}
+
+
+logger = logging.getLogger(__name__)
+
+
+def is_japanese(text: str) -> bool:
+    """Check if the text contains Japanese characters."""
+    return bool(re.search(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", text))
 
 
 def normalize_and_split(text: str, max_word_length: int = 20) -> set[str]:
@@ -23,6 +32,9 @@ def normalize_and_split(text: str, max_word_length: int = 20) -> set[str]:
     Returns:
         Set of normalized words
     """
+    if not is_japanese(text):
+        return set()
+
     text = re.sub(r"<[^>]+>", "", text)
     words = re.split(r"[,;|]", text.lower().strip())
     words = [word.strip() for word in words if word.strip()]
@@ -46,7 +58,7 @@ def build_collection_word_set(collection: Table[AnkiNote]) -> set[str]:
     return word_set
 
 
-def notes_match_auto(external_note: AnkiNote, collection_word_set: set[str]) -> bool:
+def note_matches_collection(external_note: AnkiNote, collection_word_set: set[str]) -> bool:
     """Check if note matches any collection notes using word intersection.
 
     Args:
@@ -59,65 +71,10 @@ def notes_match_auto(external_note: AnkiNote, collection_word_set: set[str]) -> 
     for field in external_note.fields:
         intersection = normalize_and_split(field).intersection(collection_word_set)
         if intersection:
+            # logger.info(f"Match for note {external_note.fields} against fields {intersection}")
             return True
 
     return False
-
-
-def remove_duplicate_notes(
-    new_deck_name: str,
-    existing_collection: Table[AnkiNote] | None = None,
-    comparison_field_index: int = 0,
-    custom_comparison: Callable[[str, str], bool] | None = None,
-) -> Table[AnkiNote]:
-    """Remove notes from new deck that already exist in the collection.
-
-    Args:
-        new_deck_name: Name of the new deck to deduplicate
-        existing_collection: Optional pre-loaded collection notes. If None, loads all notes.
-        comparison_field_index: Which field index to compare (default: 0 for first field)
-        custom_comparison: Optional custom comparison function
-
-    Returns:
-        Table of unique notes (notes that don't exist in collection)
-    """
-    # Load new deck notes
-    new_notes = load_notes(deck_name=new_deck_name)
-
-    # Load existing collection if not provided
-    if existing_collection is None:
-        existing_collection = load_notes()
-
-    # Filter out notes from the new deck itself from existing collection
-    existing_notes = existing_collection.where(
-        lambda note: note.id not in {n.id for n in new_notes}
-    )
-
-    # Define comparison function
-    if custom_comparison is None:
-
-        def default_comparison(new_field: str, existing_field: str) -> bool:
-            return new_field.strip().lower() == existing_field.strip().lower()
-
-        comparison_func = default_comparison
-    else:
-        comparison_func = custom_comparison
-
-    # Find unique notes (not duplicates)
-    unique_notes = new_notes.where(
-        lambda new_note: not existing_notes.any(
-            lambda existing_note: (
-                len(new_note.fields) > comparison_field_index
-                and len(existing_note.fields) > comparison_field_index
-                and comparison_func(
-                    new_note.fields[comparison_field_index],
-                    existing_note.fields[comparison_field_index],
-                )
-            )
-        )
-    )
-
-    return Table.from_rows(list(unique_notes), AnkiNote)
 
 
 def analyze_deck_overlap(deck1_name: str, deck2_name: str, comparison_field_index: int = 0) -> dict:
@@ -194,7 +151,17 @@ def deduplicate_external_deck(
 
     # Find unique notes (not duplicates) using word intersection
     unique_notes = external_notes.where(
-        lambda external_note: not notes_match_auto(external_note, collection_word_set)
+        lambda external_note: not note_matches_collection(external_note, collection_word_set)
+    ).materialize()
+
+    logger.info(
+        f"Kept {len(unique_notes)} unique notes out of {len(external_notes)} from {apkg_path}"
     )
 
-    return Table.from_rows(list(unique_notes), AnkiNote)
+    # dropped_notes = external_notes.where(
+    #     lambda external_note: note_matches_collection(external_note, collection_word_set)
+    # )
+
+    # for note in dropped_notes:
+    #     logger.info(f"Dropping note ID {note.id} with fields: {note.fields[3]}")
+    return unique_notes
