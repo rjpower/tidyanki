@@ -45,7 +45,7 @@ def export_notes_to_deck(
 
         note = genanki.Note(model=genanki_model, fields=anki_note.fields, tags=anki_note.tags)
         deck.add_note(note)
-        
+
         # Collect media files from this note
         all_media_files.extend(anki_note.media_files)
 
@@ -60,7 +60,7 @@ def export_notes_to_deck(
         # Create temporary files for media data and collect their paths
         temp_media_dir = Path(tempfile.mkdtemp())
         media_file_paths = []
-        
+
         # Remove duplicate MediaFile objects while preserving order
         seen_filenames = set()
         unique_media_files = []
@@ -68,13 +68,13 @@ def export_notes_to_deck(
             if media_file.filename not in seen_filenames:
                 unique_media_files.append(media_file)
                 seen_filenames.add(media_file.filename)
-        
+
         # Write MediaFile data to temporary files
         for media_file in unique_media_files:
             temp_file_path = temp_media_dir / media_file.filename
             temp_file_path.write_bytes(media_file.data)
             media_file_paths.append(str(temp_file_path))
-        
+
         package.media_files = media_file_paths
 
     package.write_to_file(str(output_path))

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 class MediaFile(BaseModel):
     """Represents a media file with its filename and binary data."""
-    
+
     filename: str
     data: bytes
 
@@ -54,7 +54,9 @@ class AnkiNote(BaseModel):
     fields: list[str]
     tags: list[str]
     model: AnkiModel | None = None  # Reference to the actual model
-    media_files: list[MediaFile] = Field(default_factory=list)  # Media files referenced in this note
+    media_files: list[MediaFile] = Field(
+        default_factory=list
+    )  # Media files referenced in this note
 
 
 class AnkiCard(BaseModel):

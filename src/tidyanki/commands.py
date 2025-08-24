@@ -37,7 +37,7 @@ def list_cards(deck_name: str, limit: int = 100) -> str:
     """List cards in a specific deck."""
     cards = load_cards(deck_name=deck_name).take(limit)
     result = [f"Found {cards.count()} cards in deck '{deck_name}':"]
-    
+
     for card in cards.to_list():
         result.append("")
         result.append("Detailed card:")
@@ -49,7 +49,7 @@ def list_cards(deck_name: str, limit: int = 100) -> str:
         result.append(f"  Fields ({len(card.fields)}):")
         for i, field in enumerate(card.fields):
             result.append(f"    [{i}]: {field}")
-    
+
     return "\n".join(result)
 
 
@@ -58,7 +58,7 @@ def search_cards_cli(query: str, deck_name: str | None = None, limit: int = 100)
     """Search for cards by content."""
     cards = search_cards(query=query, deck_name=deck_name).take(limit)
     result = [f"Found {cards.count()} cards matching '{query}':"]
-    
+
     for card in cards.to_list():
         result.append("")
         result.append("Detailed card:")
@@ -70,7 +70,7 @@ def search_cards_cli(query: str, deck_name: str | None = None, limit: int = 100)
         result.append(f"  Fields ({len(card.fields)}):")
         for i, field in enumerate(card.fields):
             result.append(f"    [{i}]: {field}")
-    
+
     return "\n".join(result)
 
 
@@ -78,7 +78,7 @@ def search_cards_cli(query: str, deck_name: str | None = None, limit: int = 100)
 def compare_decks(deck1: str, deck2: str) -> str:
     """Analyze overlap between two decks."""
     analysis = analyze_deck_overlap(deck1, deck2)
-    
+
     result = [
         f"Deck comparison: '{deck1}' vs '{deck2}'",
         f"  {deck1}: {analysis['deck1_total_notes']} total notes",
@@ -101,7 +101,10 @@ def list_templates() -> str:
     return "\n".join(result)
 
 
-@register(name="import-dedupe", description="Import .apkg file and remove notes that already exist in collection")
+@register(
+    name="import-dedupe",
+    description="Import .apkg file and remove notes that already exist in collection",
+)
 def import_deduplicate(input_apkg: str, output_path: str | None = None) -> str:
     """Import .apkg file and remove notes that already exist in collection."""
     input_path = Path(input_apkg)

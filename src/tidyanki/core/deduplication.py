@@ -2,7 +2,6 @@
 
 import logging
 import re
-from collections.abc import Callable
 from pathlib import Path
 
 from tidylinq import Table
