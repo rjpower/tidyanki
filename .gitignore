@@ -3,6 +3,7 @@ CLAUDE.md
 AGENTS.md
 .DS_Store
 
+secrets/
 decks/
 
 # Additions to standard GitHub .gitignore:
